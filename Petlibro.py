@@ -253,28 +253,57 @@ def relative_time(value: datetime) -> str:
     return f"{seconds // 86400}d ago"
 
 
-@st.cache_data
-def translate_text(text: str, target_lang: str = "zh-CN") -> str:
-    """Translate text to target language using LibreTranslate API."""
-    if not text or target_lang == "en":
+TRANSLATIONS = {
+    "zh-CN": {
+        "Live brand intelligence": "实时品牌情报",
+        "intelligence": "情报",
+        "What changed, why it matters, and which public sources support it.": "发生了什么变化、为什么重要，以及哪些公共来源支持它。",
+        "30-day history enabled": "已启用 30 天历史",
+        "YouTube connected": "YouTube 已连接",
+        "YouTube pending": "YouTube 待连接",
+        "Updated": "已更新",
+        "visible mentions": "可见提及",
+        "Primary brand": "主要品牌",
+        "Compare with": "比较对象",
+        "Add a tracked brand": "添加跟踪品牌",
+        "Sources": "来源",
+        "Date range": "日期范围",
+        "Sentiment": "情感",
+        "Search": "搜索",
+        "Refresh live data": "刷新实时数据",
+        "YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets.": "在将 `YOUTUBE_API_KEY` 添加到 Streamlit Secrets 之前，YouTube 暂停。",
+        "Download CSV": "下载 CSV",
+        "30-day history active · {count} archived mentions · new data is collected automatically every 15 minutes": "30 天历史已启用 · {count} 条存档提及 · 每 15 分钟自动收集新数据",
+        "30-day history is enabled and will build automatically every 15 minutes": "已启用 30 天历史，将自动构建每 15 分钟一次",
+        "Overview": "概览",
+        "Mentions": "提及",
+        "Analytics": "分析",
+        "Source health": "来源状态",
+        "Sentiment is based on explicit product praise, value/deal language, complaints, failures, solution phrases, and negation. Unclear or mixed language is classified as neutral. Confidence and the strongest reason are shown on each mention.": "情感基于明确的产品赞美、价值/交易语言、投诉、故障、解决方案短语和否定。含糊或混合的语言被归类为中性。每条提及都显示置信度和最强理由。",
+        "No source checks have run.": "尚未运行任何来源检查。",
+        "Pet tech market intelligence": "宠物科技市场情报",
+        "None": "无",
+        "Positive": "正面",
+        "Neutral": "中性",
+        "Negative": "负面",
+        "e.g. Whistle": "例如 Whistle",
+        "Last {days} days": "过去 {days} 天",
+        "Language": "语言",
+        "English": "英语",
+        "中文 (Mandarin)": "中文（普通话）",
+    }
+}
+
+def translate_label(text: str, lang: str) -> str:
+    if lang != "zh-CN":
         return text
-    
-    try:
-        import requests
-        response = requests.post(
-            "https://libretranslate.de/translate",
-            json={
-                "q": text,
-                "source": "en",
-                "target": "zh" if target_lang == "zh-CN" else target_lang,
-            },
-            timeout=5,
-        )
-        if response.status_code == 200:
-            return response.json().get("translatedText", text)
-    except Exception:
-        pass
-    return text
+    if text.startswith("Last ") and text.endswith(" days"):
+        try:
+            days = text.split(" ")[1]
+            return f"过去 {days} 天"
+        except Exception:
+            return text
+    return TRANSLATIONS.get(lang, {}).get(text, text)
 
 
 def topic_counts(rows: list[dict], brand: str) -> list[tuple[str, int]]:
@@ -663,27 +692,37 @@ if "language" not in st.session_state:
 
 with st.sidebar:
     st.markdown("## 🐾 Petlibro")
-    st.caption("Pet tech market intelligence")
-    
-    # Language selector
+    st.caption(translate_label("Pet tech market intelligence", st.session_state.language))
+
     language = st.radio(
-        "Language",
+        translate_label("Language", st.session_state.language),
         options=["English", "中文 (Mandarin)"],
+        index=0 if st.session_state.language == "en" else 1,
+        key="language_selector",
         horizontal=True,
     )
     st.session_state.language = "zh-CN" if language == "中文 (Mandarin)" else "en"
-    
-    st.divider()
-    
-    target_brand = st.selectbox("Primary brand", st.session_state.brands)
-    competitor_options = ["None"] + [
-        brand for brand in st.session_state.brands if brand != target_brand
-    ]
-    competitor_choice = st.selectbox("Compare with", competitor_options)
-    competitor_brand = None if competitor_choice == "None" else competitor_choice
 
     st.divider()
-    new_brand = st.text_input("Add a tracked brand", placeholder="e.g. Whistle")
+
+    target_brand = st.selectbox(
+        translate_label("Primary brand", st.session_state.language),
+        st.session_state.brands,
+    )
+    competitor_options = [translate_label("None", st.session_state.language)] + [
+        brand for brand in st.session_state.brands if brand != target_brand
+    ]
+    competitor_choice = st.selectbox(
+        translate_label("Compare with", st.session_state.language),
+        competitor_options,
+    )
+    competitor_brand = None if competitor_choice == translate_label("None", st.session_state.language) else competitor_choice
+
+    st.divider()
+    new_brand = st.text_input(
+        translate_label("Add a tracked brand", st.session_state.language),
+        placeholder=translate_label("e.g. Whistle", st.session_state.language),
+    )
     if st.button("Add brand", width="stretch"):
         cleaned = new_brand.strip()
         if cleaned and cleaned.casefold() not in {
@@ -693,27 +732,40 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    selected_sources = st.multiselect("Sources", SOURCES, default=SOURCES)
+    selected_sources = st.multiselect(
+        translate_label("Sources", st.session_state.language),
+        SOURCES,
+        default=SOURCES,
+    )
     date_window = st.select_slider(
-        "Date range",
+        translate_label("Date range", st.session_state.language),
         options=[1, 3, 7, 14, 30],
         value=30,
-        format_func=lambda days: f"Last {days} days",
+        format_func=lambda days: translate_label(f"Last {days} days", st.session_state.language),
     )
     selected_sentiments = st.multiselect(
-        "Sentiment",
-        ["Positive", "Neutral", "Negative"],
+        translate_label("Sentiment", st.session_state.language),
+        [translate_label("Positive", st.session_state.language), translate_label("Neutral", st.session_state.language), translate_label("Negative", st.session_state.language)],
         default=["Positive", "Neutral", "Negative"],
     )
-    query = st.text_input("Search", placeholder="Headline, author, publisher")
+    query = st.text_input(
+        translate_label("Search", st.session_state.language),
+        placeholder=translate_label("Headline, author, publisher", st.session_state.language),
+    )
 
     st.divider()
-    force_refresh = st.button("↻ Refresh live data", width="stretch")
+    force_refresh = st.button(
+        translate_label("↻ Refresh live data", st.session_state.language),
+        width="stretch",
+    )
     if force_refresh:
         st.cache_data.clear()
         st.rerun()
     if not secret("YOUTUBE_API_KEY"):
-        st.caption("YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets.")
+        st.caption(translate_label(
+            "YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets.",
+            st.session_state.language,
+        ))
 
 brands_to_fetch = [target_brand] + ([competitor_brand] if competitor_brand else [])
 with st.spinner("Collecting live mentions…"):
@@ -769,14 +821,14 @@ latest_collection = max(
 # Translation helpers
 lang = st.session_state.get("language", "en")
 labels = {
-    "live_intel": translate_text("Live brand intelligence", lang),
-    "intel_title": translate_text("intelligence", lang),
-    "description": translate_text("What changed, why it matters, and which public sources support it.", lang),
-    "history_enabled": translate_text("30-day history enabled", lang),
-    "youtube_connected": translate_text("YouTube connected", lang),
-    "youtube_pending": translate_text("YouTube pending", lang),
-    "updated": translate_text("Updated", lang),
-    "visible_mentions": translate_text("visible mentions", lang),
+    "live_intel": translate_label("Live brand intelligence", lang),
+    "intel_title": translate_label("intelligence", lang),
+    "description": translate_label("What changed, why it matters, and which public sources support it.", lang),
+    "history_enabled": translate_label("30-day history enabled", lang),
+    "youtube_connected": translate_label("YouTube connected", lang),
+    "youtube_pending": translate_label("YouTube pending", lang),
+    "updated": translate_label("Updated", lang),
+    "visible_mentions": translate_label("visible mentions", lang),
 }
 
 history_badge = f'<span class="mode-badge history">● {labels["history_enabled"]}</span>'
@@ -808,7 +860,7 @@ with download_col:
     if not csv_frame.empty:
         csv_frame["published_at"] = csv_frame["published_at"].astype(str)
     st.download_button(
-        "Download CSV",
+        translate_label("Download CSV", lang),
         csv_frame.to_csv(index=False).encode("utf-8"),
         file_name=f"{target_brand.casefold().replace(' ', '-')}-mentions.csv",
         mime="text/csv",
@@ -816,10 +868,15 @@ with download_col:
     )
 with freshness_col:
     retention_text = (
-        f"30-day history active · {len(archived_mentions)} archived mentions · "
-        "new data is collected automatically every 15 minutes"
+        translate_label(
+            f"30-day history active · {len(archived_mentions)} archived mentions · new data is collected automatically every 15 minutes",
+            lang,
+        )
         if archived_mentions
-        else "30-day history is enabled and will build automatically every 15 minutes"
+        else translate_label(
+            "30-day history is enabled and will build automatically every 15 minutes",
+            lang,
+        )
     )
     st.markdown(
         f'<div class="retention-note">✓ {safe(retention_text)}</div>',
@@ -827,7 +884,12 @@ with freshness_col:
     )
 
 overview_tab, mentions_tab, analytics_tab, health_tab = st.tabs(
-    ["Overview", "Mentions", "Analytics", "Source health"]
+    [
+        translate_label("Overview", lang),
+        translate_label("Mentions", lang),
+        translate_label("Analytics", lang),
+        translate_label("Source health", lang),
+    ]
 )
 with overview_tab:
     render_overview(filtered, target_brand, competitor_brand)
