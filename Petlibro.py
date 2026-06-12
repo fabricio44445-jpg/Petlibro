@@ -12,6 +12,12 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+try:
+    from google.cloud import translate_v2
+    HAS_GOOGLE_TRANSLATE = True
+except ImportError:
+    HAS_GOOGLE_TRANSLATE = False
+
 from archive import load_archive as load_repository_history
 from collectors import SOURCE_ICONS, collect_mentions, deduplicate
 
@@ -251,6 +257,30 @@ def relative_time(value: datetime) -> str:
     if seconds < 86400:
         return f"{seconds // 3600}h ago"
     return f"{seconds // 86400}d ago"
+
+
+@st.cache_data
+def translate_text(text: str, target_lang: str = "zh-CN") -> str:
+    """Translate text to target language using LibreTranslate API."""
+    if not text or target_lang == "en":
+        return text
+    
+    try:
+        import requests
+        response = requests.post(
+            "https://libretranslate.de/translate",
+            json={
+                "q": text,
+                "source": "en",
+                "target": "zh" if target_lang == "zh-CN" else target_lang,
+            },
+            timeout=5,
+        )
+        if response.status_code == 200:
+            return response.json().get("translatedText", text)
+    except Exception:
+        pass
+    return text
 
 
 def topic_counts(rows: list[dict], brand: str) -> list[tuple[str, int]]:
@@ -634,9 +664,23 @@ inject_styles()
 if "brands" not in st.session_state:
     st.session_state.brands = DEFAULT_BRANDS.copy()
 
+if "language" not in st.session_state:
+    st.session_state.language = "en"
+
 with st.sidebar:
     st.markdown("## 🐾 Petlibro")
     st.caption("Pet tech market intelligence")
+    
+    # Language selector
+    language = st.radio(
+        "Language",
+        options=["English", "中文 (Mandarin)"],
+        horizontal=True,
+    )
+    st.session_state.language = "zh-CN" if language == "中文 (Mandarin)" else "en"
+    
+    st.divider()
+    
     target_brand = st.selectbox("Primary brand", st.session_state.brands)
     competitor_options = ["None"] + [
         brand for brand in st.session_state.brands if brand != target_brand
@@ -727,23 +771,37 @@ latest_collection = max(
     ),
     default=datetime.now(timezone.utc),
 )
-history_badge = '<span class="mode-badge history">● 30-day history enabled</span>'
+
+# Translation helpers
+lang = st.session_state.get("language", "en")
+labels = {
+    "live_intel": translate_text("Live brand intelligence", lang),
+    "intel_title": translate_text("intelligence", lang),
+    "description": translate_text("What changed, why it matters, and which public sources support it.", lang),
+    "history_enabled": translate_text("30-day history enabled", lang),
+    "youtube_connected": translate_text("YouTube connected", lang),
+    "youtube_pending": translate_text("YouTube pending", lang),
+    "updated": translate_text("Updated", lang),
+    "visible_mentions": translate_text("visible mentions", lang),
+}
+
+history_badge = f'<span class="mode-badge history">● {labels["history_enabled"]}</span>'
 youtube_badge = (
-    '<span class="mode-badge">YouTube connected</span>'
+    f'<span class="mode-badge">{labels["youtube_connected"]}</span>'
     if secret("YOUTUBE_API_KEY")
-    else '<span class="mode-badge">YouTube pending</span>'
+    else f'<span class="mode-badge">{labels["youtube_pending"]}</span>'
 )
 st.markdown(
     f"""
     <section class="hero">
-      <div class="kicker">Live brand intelligence</div>
-      <h1>{safe(target_brand)} intelligence</h1>
-      <p>What changed, why it matters, and which public sources support it.</p>
+      <div class="kicker">{safe(labels["live_intel"])}</div>
+      <h1>{safe(target_brand)} {safe(labels["intel_title"])}</h1>
+      <p>{safe(labels["description"])}</p>
       <div class="mode-row">
         {history_badge}
         {youtube_badge}
-        <span class="mode-badge">Updated {safe(relative_time(latest_collection))}</span>
-        <span class="mode-badge">{len(filtered)} visible mentions</span>
+        <span class="mode-badge">{safe(labels["updated"])} {safe(relative_time(latest_collection))}</span>
+        <span class="mode-badge">{len(filtered)} {safe(labels["visible_mentions"])}</span>
       </div>
     </section>
     """,
