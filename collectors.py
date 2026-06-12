@@ -478,15 +478,37 @@ def deduplicate(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(unique.values(), key=lambda row: row["published_at"], reverse=True)
 
 
+def fetch_custom_feeds(
+    brand: str,
+    feed_urls: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    mentions: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for url in feed_urls:
+        rows, error = fetch_feed(
+            url,
+            brand=brand,
+            source="Publication feeds",
+            publisher=url,
+            require_match=True,
+        )
+        mentions.extend(rows)
+        if error:
+            errors.append(f"{url}: {error}")
+    return mentions, errors
+
+
 def collect_mentions(
     brands: list[str],
     sources: list[str],
     youtube_api_key: str | None = None,
+    custom_feed_urls: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Collect selected sources and return mentions plus per-source status."""
     rows: list[dict[str, Any]] = []
     statuses: list[dict[str, Any]] = []
 
+    custom_feed_urls = custom_feed_urls or []
     for brand in brands:
         collectors = []
         if "Google News" in sources:
@@ -499,6 +521,10 @@ def collect_mentions(
             collectors.append(
                 ("YouTube", lambda brand=brand: fetch_youtube(brand, youtube_api_key))
             )
+        if "Publication feeds" in sources:
+            collectors.append(("Publication feeds", lambda brand=brand: fetch_publication_feeds(brand)))
+        if custom_feed_urls:
+            collectors.append(("Custom publication feeds", lambda brand=brand: fetch_custom_feeds(brand, custom_feed_urls)))
 
         for source_name, collector in collectors:
             collected, error = collector()
@@ -510,19 +536,6 @@ def collect_mentions(
                     "count": len(collected),
                     "ok": error is None,
                     "message": error or "Connected",
-                }
-            )
-
-        if "Blogs" in sources:
-            collected, errors = fetch_publication_feeds(brand)
-            rows.extend(collected)
-            statuses.append(
-                {
-                    "brand": brand,
-                    "source": "Publication feeds",
-                    "count": len(collected),
-                    "ok": not errors,
-                    "message": "; ".join(errors) if errors else "Connected",
                 }
             )
 

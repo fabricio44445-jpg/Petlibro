@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-SOURCES = ["Google News", "Reddit", "YouTube", "Blogs"]
+SOURCES = ["Google News", "Reddit", "YouTube", "Blogs", "Publication feeds"]
 DEFAULT_BRANDS = ["Petlibro", "Catit", "Sure Petcare", "Whistle"]
 STOP_WORDS = {
     "about", "after", "again", "against", "also", "been", "before", "being",
@@ -48,9 +48,15 @@ def load_mentions(
     sources: tuple[str, ...],
     youtube_api_key: str | None,
     schema_version: int = 2,
+    publication_feed_urls: tuple[str, ...] = (),
 ) -> tuple[list[dict], list[dict]]:
     del schema_version
-    return collect_mentions(list(brands), list(sources), youtube_api_key)
+    return collect_mentions(
+        list(brands),
+        list(sources),
+        youtube_api_key,
+        custom_feed_urls=list(publication_feed_urls),
+    )
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -253,59 +259,6 @@ def relative_time(value: datetime) -> str:
     return f"{seconds // 86400}d ago"
 
 
-TRANSLATIONS = {
-    "zh-CN": {
-        "Live brand intelligence": "实时品牌情报",
-        "intelligence": "情报",
-        "What changed, why it matters, and which public sources support it.": "发生了什么变化、为什么重要，以及哪些公共来源支持它。",
-        "30-day history enabled": "已启用 30 天历史",
-        "YouTube connected": "YouTube 已连接",
-        "YouTube pending": "YouTube 待连接",
-        "Updated": "已更新",
-        "visible mentions": "可见提及",
-        "Primary brand": "主要品牌",
-        "Compare with": "比较对象",
-        "Add a tracked brand": "添加跟踪品牌",
-        "Sources": "来源",
-        "Date range": "日期范围",
-        "Sentiment": "情感",
-        "Search": "搜索",
-        "Refresh live data": "刷新实时数据",
-        "YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets.": "在将 `YOUTUBE_API_KEY` 添加到 Streamlit Secrets 之前，YouTube 暂停。",
-        "Download CSV": "下载 CSV",
-        "30-day history active · {count} archived mentions · new data is collected automatically every 15 minutes": "30 天历史已启用 · {count} 条存档提及 · 每 15 分钟自动收集新数据",
-        "30-day history is enabled and will build automatically every 15 minutes": "已启用 30 天历史，将自动构建每 15 分钟一次",
-        "Overview": "概览",
-        "Mentions": "提及",
-        "Analytics": "分析",
-        "Source health": "来源状态",
-        "Sentiment is based on explicit product praise, value/deal language, complaints, failures, solution phrases, and negation. Unclear or mixed language is classified as neutral. Confidence and the strongest reason are shown on each mention.": "情感基于明确的产品赞美、价值/交易语言、投诉、故障、解决方案短语和否定。含糊或混合的语言被归类为中性。每条提及都显示置信度和最强理由。",
-        "No source checks have run.": "尚未运行任何来源检查。",
-        "Pet tech market intelligence": "宠物科技市场情报",
-        "None": "无",
-        "Positive": "正面",
-        "Neutral": "中性",
-        "Negative": "负面",
-        "e.g. Whistle": "例如 Whistle",
-        "Last {days} days": "过去 {days} 天",
-        "Language": "语言",
-        "English": "英语",
-        "中文 (Mandarin)": "中文（普通话）",
-    }
-}
-
-def translate_label(text: str, lang: str) -> str:
-    if lang != "zh-CN":
-        return text
-    if text.startswith("Last ") and text.endswith(" days"):
-        try:
-            days = text.split(" ")[1]
-            return f"过去 {days} 天"
-        except Exception:
-            return text
-    return TRANSLATIONS.get(lang, {}).get(text, text)
-
-
 def topic_counts(rows: list[dict], brand: str) -> list[tuple[str, int]]:
     ignored = STOP_WORDS | {part.casefold() for part in re.findall(r"\w+", brand)}
     words: list[str] = []
@@ -369,7 +322,7 @@ def metric_card(
 
 
 def render_mention(row: dict) -> None:
-    summary = row["summary"] or "No summary supplied by this source."
+    summary = row.get("summary") or "No summary supplied by this source."
     confidence = row.get("sentiment_confidence", "Low")
     reason = row.get("sentiment_reason", "Automated text classification")
     st.markdown(
@@ -377,19 +330,23 @@ def render_mention(row: dict) -> None:
         <div class="mention-card">
           <div class="mention-top">
             <span class="source-pill">{SOURCE_ICONS.get(row["source"], "•")} {safe(row["source"])}</span>
-            <span class="sentiment {safe(row["sentiment"])}">{safe(row["sentiment"])}</span>
+            <span class="sentiment {safe(row["sentiment"])}}">{safe(row["sentiment"])}</span>
           </div>
           <div class="mention-title">{safe(row["title"])}</div>
           <div class="mention-summary">{safe(summary[:300])}</div>
           <div class="mention-meta">
-            {safe(row["author"])} · {safe(relative_time(row["published_at"]))} ·
+            {safe(row.get("author", "Unknown"))} · {safe(relative_time(row["published_at"]))} ·
             {safe(confidence)} confidence · {safe(reason)}
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.link_button("Open source ↗", row["link"], width="content")
+    st.link_button(
+        "Open source ↗",
+        row["link"],
+        width="content",
+    )
 
 
 def render_overview(rows: list[dict], target: str, competitor: str | None) -> None:
@@ -462,95 +419,24 @@ def render_overview(rows: list[dict], target: str, competitor: str | None) -> No
             "Share of voice",
             f"{share}%",
             share_change,
-            "selected brands",
+            f"{len(target_rows)} of {len(rows)} mentions",
             share_direction,
         )
     with metric_cols[3]:
         metric_card(
-            "Priority mentions",
-            f"{negative:,}",
+            "Negative alerts",
+            f"{current_negative}",
             risk_change,
-            "negative coverage",
+            "Sentiment risk",
             risk_direction,
         )
 
-    st.write("")
-    chart_col, sentiment_col = st.columns([1.75, 1])
-    frame = pd.DataFrame(target_rows + competitor_rows)
-    if not frame.empty:
-        frame["date"] = pd.to_datetime(frame["published_at"], utc=True).dt.floor("D")  # type: ignore[attr-defined]
-        timeline = frame.groupby(["date", "brand"]).size().reset_index(name="mentions")
-        chart = (
-            alt.Chart(timeline)
-            .mark_line(point=True, strokeWidth=2.5)
-            .encode(
-                x=alt.X("date:T", title=None, axis=alt.Axis(format="%b %d")),
-                y=alt.Y("mentions:Q", title="Mentions", scale=alt.Scale(zero=True)),
-                color=alt.Color(
-                    "brand:N",
-                    scale=alt.Scale(range=["#1e4620", "#8fa892", "#4b7751"]),
-                    legend=alt.Legend(title=None, orient="top"),
-                ),
-                tooltip=["brand:N", alt.Tooltip("date:T", format="%b %d"), "mentions:Q"],
-            )
-            .properties(height=310)
-        )
-        with chart_col:
-            st.markdown('<div class="eyebrow">Conversation activity</div>', unsafe_allow_html=True)
-            st.subheader("Mention volume")
-            st.altair_chart(chart, use_container_width=True)
-        with sentiment_col:
-            st.markdown('<div class="eyebrow">Audience response</div>', unsafe_allow_html=True)
-            st.subheader("Sentiment")
-            sentiment = (
-                pd.DataFrame(target_rows)
-                .groupby("sentiment")
-                .size()
-                .reset_index(name="mentions")
-            )
-            donut = (
-                alt.Chart(sentiment)
-                .mark_arc(innerRadius=70, outerRadius=105)
-                .encode(
-                    theta="mentions:Q",
-                    color=alt.Color(
-                        "sentiment:N",
-                        scale=alt.Scale(
-                            domain=["Positive", "Neutral", "Negative"],
-                            range=["#198754", "#c9d0ce", "#d55050"],
-                        ),
-                        legend=alt.Legend(title=None, orient="bottom"),
-                    ),
-                    tooltip=["sentiment:N", "mentions:Q"],
-                )
-                .properties(height=310)
-            )
-            st.altair_chart(donut, use_container_width=True)
-
-    topics = topic_counts(target_rows, target)
-    top_topic = topics[0][0].title() if topics else "general coverage"
-    top_source = Counter(row["source"] for row in target_rows).most_common(1)
-    top_source_name = top_source[0][0] if top_source else "selected sources"
-    st.markdown(
-        f"""
-        <div class="briefing">
-          <div class="eyebrow">Evidence-backed briefing</div>
-          <h3>{safe(target)} is receiving the most attention around {safe(top_topic)}.</h3>
-          <p>
-            Petlibro found <strong>{len(target_rows)} mentions</strong> in the selected
-            period. {safe(top_source_name)} currently contributes the largest volume.
-            {negative} mentions are classified as negative and deserve manual review.
-            Seven-day volume is {safe(volume_change.lower())}. Automated sentiment is
-            directional, so open the supporting sources before acting.
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    attention_col, topic_col = st.columns([1.7, 1])
+    attention_col, topic_col = st.columns([2, 1])
     with attention_col:
-        st.markdown('<div class="eyebrow">Latest activity</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="eyebrow">{safe("Latest activity")}</div>',
+            unsafe_allow_html=True,
+        )
         st.subheader("Mentions requiring attention")
         priority = sorted(
             target_rows,
@@ -565,9 +451,14 @@ def render_overview(rows: list[dict], target: str, competitor: str | None) -> No
                 render_mention(row)
         else:
             st.info("No mentions match the current filters.")
+
     with topic_col:
-        st.markdown('<div class="eyebrow">Conversation drivers</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="eyebrow">{safe("Conversation drivers")}</div>',
+            unsafe_allow_html=True,
+        )
         st.subheader("Trending terms")
+        topics = topic_counts(target_rows, target)
         if topics:
             topic_frame = pd.DataFrame(topics, columns=["topic", "mentions"])
             bars = (
@@ -586,7 +477,10 @@ def render_overview(rows: list[dict], target: str, competitor: str | None) -> No
 
 
 def render_mentions(rows: list[dict]) -> None:
-    st.markdown('<div class="eyebrow">Unified inbox</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="eyebrow">{safe("Unified inbox")}</div>',
+        unsafe_allow_html=True,
+    )
     st.header("Live mentions")
     st.caption(f"{len(rows)} results · newest first · open a source to verify context")
     if not rows:
@@ -595,14 +489,22 @@ def render_mentions(rows: list[dict]) -> None:
 
     page_size = 12
     pages = max(1, (len(rows) + page_size - 1) // page_size)
-    page = st.number_input("Page", min_value=1, max_value=pages, value=1)
+    page = st.number_input(
+        "Page",
+        min_value=1,
+        max_value=pages,
+        value=1,
+    )
     start = (page - 1) * page_size
     for row in rows[start : start + page_size]:
         render_mention(row)
 
 
 def render_analytics(rows: list[dict], target: str) -> None:
-    st.markdown('<div class="eyebrow">Deeper analysis</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="eyebrow">{safe("Deeper analysis")}</div>',
+        unsafe_allow_html=True,
+    )
     st.header("Analytics")
     target_rows = [row for row in rows if row["brand"] == target]
     if not target_rows:
@@ -642,6 +544,7 @@ def render_analytics(rows: list[dict], target: str) -> None:
         )
         .properties(height=280)
     )
+
     first, second = st.columns(2)
     with first:
         st.subheader("Mentions by source")
@@ -660,7 +563,10 @@ def render_analytics(rows: list[dict], target: str) -> None:
 
 
 def render_source_health(statuses: list[dict]) -> None:
-    st.markdown('<div class="eyebrow">Collection diagnostics</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="eyebrow">{safe("Collection diagnostics")}</div>',
+        unsafe_allow_html=True,
+    )
     st.header("Source health")
     st.caption("Failures are shown explicitly; Petlibro never silently drops a source.")
     if not statuses:
@@ -676,7 +582,7 @@ def render_source_health(statuses: list[dict]) -> None:
                 "count": "Mentions",
                 "message": "Details",
             }
-        ),  # type: ignore[call-arg]
+        ),
         use_container_width=True,
         hide_index=True,
     )
@@ -687,41 +593,27 @@ inject_styles()
 if "brands" not in st.session_state:
     st.session_state.brands = DEFAULT_BRANDS.copy()
 
-if "language" not in st.session_state:
-    st.session_state.language = "en"
-
 with st.sidebar:
     st.markdown("## 🐾 Petlibro")
-    st.caption(translate_label("Pet tech market intelligence", st.session_state.language))
-
-    language = st.radio(
-        translate_label("Language", st.session_state.language),
-        options=["English", "中文 (Mandarin)"],
-        index=0 if st.session_state.language == "en" else 1,
-        key="language_selector",
-        horizontal=True,
-    )
-    st.session_state.language = "zh-CN" if language == "中文 (Mandarin)" else "en"
-
-    st.divider()
+    st.caption("Pet tech market intelligence")
 
     target_brand = st.selectbox(
-        translate_label("Primary brand", st.session_state.language),
+        "Primary brand",
         st.session_state.brands,
     )
-    competitor_options = [translate_label("None", st.session_state.language)] + [
+    competitor_options = ["None"] + [
         brand for brand in st.session_state.brands if brand != target_brand
     ]
     competitor_choice = st.selectbox(
-        translate_label("Compare with", st.session_state.language),
+        "Compare with",
         competitor_options,
     )
-    competitor_brand = None if competitor_choice == translate_label("None", st.session_state.language) else competitor_choice
+    competitor_brand = None if competitor_choice == "None" else competitor_choice
 
     st.divider()
     new_brand = st.text_input(
-        translate_label("Add a tracked brand", st.session_state.language),
-        placeholder=translate_label("e.g. Whistle", st.session_state.language),
+        "Add a tracked brand",
+        placeholder="e.g. Whistle",
     )
     if st.button("Add brand", width="stretch"):
         cleaned = new_brand.strip()
@@ -733,39 +625,50 @@ with st.sidebar:
 
     st.divider()
     selected_sources = st.multiselect(
-        translate_label("Sources", st.session_state.language),
+        "Sources",
         SOURCES,
         default=SOURCES,
     )
+    publication_feed_urls = st.text_area(
+        "Additional publication feeds",
+        placeholder="Add one RSS feed URL per line",
+        help="Enter custom RSS feeds to extend publication coverage.",
+        height=120,
+    )
+    custom_feed_urls = [
+        line.strip() for line in publication_feed_urls.splitlines() if line.strip()
+    ]
+    if custom_feed_urls and "Publication feeds" not in selected_sources:
+        selected_sources.append("Publication feeds")
+
     date_window = st.select_slider(
-        translate_label("Date range", st.session_state.language),
+        "Date range",
         options=[1, 3, 7, 14, 30],
         value=30,
-        format_func=lambda days: translate_label(f"Last {days} days", st.session_state.language),
+        format_func=lambda days: f"Last {days} days",
     )
     selected_sentiments = st.multiselect(
-        translate_label("Sentiment", st.session_state.language),
-        [translate_label("Positive", st.session_state.language), translate_label("Neutral", st.session_state.language), translate_label("Negative", st.session_state.language)],
+        "Sentiment",
+        ["Positive", "Neutral", "Negative"],
         default=["Positive", "Neutral", "Negative"],
     )
     query = st.text_input(
-        translate_label("Search", st.session_state.language),
-        placeholder=translate_label("Headline, author, publisher", st.session_state.language),
+        "Search",
+        placeholder="Headline, author, publisher",
     )
 
     st.divider()
     force_refresh = st.button(
-        translate_label("↻ Refresh live data", st.session_state.language),
+        "↻ Refresh live data",
         width="stretch",
     )
     if force_refresh:
         st.cache_data.clear()
         st.rerun()
     if not secret("YOUTUBE_API_KEY"):
-        st.caption(translate_label(
-            "YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets.",
-            st.session_state.language,
-        ))
+        st.caption(
+            "YouTube is paused until `YOUTUBE_API_KEY` is added to Streamlit Secrets."
+        )
 
 brands_to_fetch = [target_brand] + ([competitor_brand] if competitor_brand else [])
 with st.spinner("Collecting live mentions…"):
@@ -774,6 +677,7 @@ with st.spinner("Collecting live mentions…"):
         tuple(selected_sources),
         secret("YOUTUBE_API_KEY"),
         2,
+        tuple(custom_feed_urls),
     )
 
 archived_mentions = load_archive(tuple(brands_to_fetch), 1)
@@ -806,7 +710,7 @@ filtered = [
     and (
         not query
         or query.casefold()
-        in f"{row['title']} {row['summary']} {row['author']} {row['publisher']}".casefold()
+        in f"{row['title']} {row.get('summary','')} {row.get('author','')} {row.get('publisher','') }".casefold()
     )
 ]
 
@@ -818,49 +722,37 @@ latest_collection = max(
     default=datetime.now(timezone.utc),
 )
 
-# Translation helpers
-lang = st.session_state.get("language", "en")
-labels = {
-    "live_intel": translate_label("Live brand intelligence", lang),
-    "intel_title": translate_label("intelligence", lang),
-    "description": translate_label("What changed, why it matters, and which public sources support it.", lang),
-    "history_enabled": translate_label("30-day history enabled", lang),
-    "youtube_connected": translate_label("YouTube connected", lang),
-    "youtube_pending": translate_label("YouTube pending", lang),
-    "updated": translate_label("Updated", lang),
-    "visible_mentions": translate_label("visible mentions", lang),
-}
-
-history_badge = f'<span class="mode-badge history">● {labels["history_enabled"]}</span>'
+history_badge = '<span class="mode-badge history">● 30-day history enabled</span>'
 youtube_badge = (
-    f'<span class="mode-badge">{labels["youtube_connected"]}</span>'
+    '<span class="mode-badge">YouTube connected</span>'
     if secret("YOUTUBE_API_KEY")
-    else f'<span class="mode-badge">{labels["youtube_pending"]}</span>'
+    else '<span class="mode-badge">YouTube pending</span>'
 )
 st.markdown(
     f"""
     <section class="hero">
-      <div class="kicker">{safe(labels["live_intel"])}</div>
-      <h1>{safe(target_brand)} {safe(labels["intel_title"])}</h1>
-      <p>{safe(labels["description"])}</p>
+      <div class="kicker">live brand intelligence</div>
+      <h1>{safe(target_brand)} intelligence</h1>
+      <p>What changed, why it matters, and which public sources support it.</p>
       <div class="mode-row">
         {history_badge}
         {youtube_badge}
-        <span class="mode-badge">{safe(labels["updated"])} {safe(relative_time(latest_collection))}</span>
-        <span class="mode-badge">{len(filtered)} {safe(labels["visible_mentions"])}</span>
+        <span class="mode-badge">Updated {safe(relative_time(latest_collection))}</span>
+        <span class="mode-badge">{len(filtered)} visible mentions</span>
       </div>
     </section>
     """,
     unsafe_allow_html=True,
 )
 
+csv_frame = pd.DataFrame(filtered)
+if not csv_frame.empty:
+    csv_frame["published_at"] = csv_frame["published_at"].astype(str)
+
 download_col, freshness_col = st.columns([0.28, 0.72])
 with download_col:
-    csv_frame = pd.DataFrame(filtered)
-    if not csv_frame.empty:
-        csv_frame["published_at"] = csv_frame["published_at"].astype(str)
     st.download_button(
-        translate_label("Download CSV", lang),
+        "Download CSV",
         csv_frame.to_csv(index=False).encode("utf-8"),
         file_name=f"{target_brand.casefold().replace(' ', '-')}-mentions.csv",
         mime="text/csv",
@@ -868,15 +760,9 @@ with download_col:
     )
 with freshness_col:
     retention_text = (
-        translate_label(
-            f"30-day history active · {len(archived_mentions)} archived mentions · new data is collected automatically every 15 minutes",
-            lang,
-        )
+        f"30-day history active · {len(archived_mentions)} archived mentions · new data is collected automatically every 15 minutes"
         if archived_mentions
-        else translate_label(
-            "30-day history is enabled and will build automatically every 15 minutes",
-            lang,
-        )
+        else "30-day history is enabled and will build automatically every 15 minutes"
     )
     st.markdown(
         f'<div class="retention-note">✓ {safe(retention_text)}</div>',
@@ -885,10 +771,10 @@ with freshness_col:
 
 overview_tab, mentions_tab, analytics_tab, health_tab = st.tabs(
     [
-        translate_label("Overview", lang),
-        translate_label("Mentions", lang),
-        translate_label("Analytics", lang),
-        translate_label("Source health", lang),
+        "Overview",
+        "Mentions",
+        "Analytics",
+        "Source health",
     ]
 )
 with overview_tab:
