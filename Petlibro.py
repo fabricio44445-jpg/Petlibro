@@ -12,12 +12,6 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-try:
-    from google.cloud import translate_v2
-    HAS_GOOGLE_TRANSLATE = True
-except ImportError:
-    HAS_GOOGLE_TRANSLATE = False
-
 from archive import load_archive as load_repository_history
 from collectors import SOURCE_ICONS, collect_mentions, deduplicate
 
