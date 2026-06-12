@@ -330,7 +330,7 @@ def render_mention(row: dict) -> None:
         <div class="mention-card">
           <div class="mention-top">
             <span class="source-pill">{SOURCE_ICONS.get(row["source"], "•")} {safe(row["source"])}</span>
-            <span class="sentiment {safe(row["sentiment"])}}">{safe(row["sentiment"])}</span>
+            <span class="sentiment {safe(row["sentiment"])}">{safe(row["sentiment"])}</span>
           </div>
           <div class="mention-title">{safe(row["title"])}</div>
           <div class="mention-summary">{safe(summary[:300])}</div>
